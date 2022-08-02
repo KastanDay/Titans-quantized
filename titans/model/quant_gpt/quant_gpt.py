@@ -17,7 +17,7 @@ from titans.layer.head import GPTLMHead
 from titans.loss.lm_loss import GPTLMLoss
 from torch import dtype, nn
 
-__all__ = ['Quant_GPT', 'GPTLMLoss', 'quant_gpt2_small', 'quant_gpt2_medium', 'quant_gpt2_large', 'quant_gpt2_xl', 'quant_gpt2_8B', 'quant_gpt3']
+__all__ = ['Quant_GPT', 'GPTLMLoss', 'quant_gpt2_micro', 'quant_gpt2_small', 'quant_gpt2_medium', 'quant_gpt2_large', 'quant_gpt2_xl', 'quant_gpt2_8B', 'quant_gpt3']
 
 # Torch Datatypes: https://pytorch.org/docs/stable/tensor_attributes.html#torch.dtype
 
@@ -62,7 +62,11 @@ class Quant_GPT(nn.Module):
                  layernorm_epsilon: float = 1e-5,
                  activation: Callable = nn.functional.gelu,
                  padding_idx: int = None,
-                 dtype: dtype = torch.int8,     # WARNING: Adding int8 for extreme comparison.
+                #  dtype: dtype = None,     # TODO: check what the default dtype ype is on nn.Module
+                 embed_dtype: dtype = torch.float16,     # WARNING: Adding int8 for extreme comparison.
+                 decoder_dtype: dtype = None,     # WARNING: Adding int8 for extreme comparison.
+                 layernorm_dtype: dtype = None,     # WARNING: Adding int8 for extreme comparison.
+                 head_dtype: dtype = None,     # WARNING: Adding int8 for extreme comparison.
                  bias: bool = True,
                  apply_post_layernorm: bool = False,
                  fuse_scale_mask_softmax: bool = False,
@@ -74,7 +78,7 @@ class Quant_GPT(nn.Module):
                                   max_position_embeddings=max_position_embeddings,
                                   padding_idx=padding_idx,
                                   dropout=embedding_dropout,
-                                  dtype=dtype)
+                                  dtype=embed_dtype)
         self.blocks = nn.ModuleList([
             GPTBlock(hidden_size=hidden_size,
                      num_heads=num_heads,
@@ -83,7 +87,7 @@ class Quant_GPT(nn.Module):
                      attention_dropout=attention_dropout,
                      dropout=dropout,
                      layernorm_epsilon=layernorm_epsilon,
-                     dtype=dtype,
+                     dtype=decoder_dtype,
                      bias=bias,
                      apply_post_layernorm=apply_post_layernorm,
                      fuse_scale_mask_softmax=fuse_scale_mask_softmax,
@@ -91,14 +95,14 @@ class Quant_GPT(nn.Module):
                      activation_offload=activation_offload) for _ in range(depth)
         ])
 
-        self.norm = col_nn.LayerNorm(normalized_shape=hidden_size, eps=layernorm_epsilon, dtype=dtype)
+        self.norm = col_nn.LayerNorm(normalized_shape=hidden_size, eps=layernorm_epsilon, dtype=layernorm_dtype)
 
         self.head = GPTLMHead(
             hidden_size=hidden_size,
             vocab_size=vocab_size,
             embedding_layer=self.embed,
         # word_embeeding_weight=self.embed.word_embedding_weight,
-            dtype=dtype)
+            dtype=head_dtype)
 
     def forward(self, input_ids, attention_mask=None):
 
@@ -127,11 +131,19 @@ class Quant_GPT(nn.Module):
 
         return x
 
+# example specifying dtypes
+# Quant_GPT(embed_dtype=torch.float16, head_dtype=torch.float32, layernorm_dtype=torch.float32, decoder_dtype=torch.float32)
 
 def _create_gpt_model(**model_kwargs):
     model = Quant_GPT(**model_kwargs)
     return model
 
+
+def quant_gpt2_micro(**kwargs):
+    model_kwargs = dict(hidden_size=768, depth=4, num_heads=4, **kwargs)
+    return _create_gpt_model(**model_kwargs)
+
+#### STANDARD MODELS (colossalai-implemented) ####
 
 def quant_gpt2_small(**kwargs):
     model_kwargs = dict(hidden_size=768, depth=12, num_heads=12, **kwargs)
