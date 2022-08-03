@@ -1,4 +1,5 @@
 import math
+from contextlib import suppress
 from typing import Callable
 
 import torch
@@ -72,6 +73,14 @@ class Quant_GPT(nn.Module):
                  fuse_scale_mask_softmax: bool = False,
                  checkpoint: bool = False,
                  activation_offload: bool = False) -> None:
+        
+        # Class variables
+        self.embed_dtype = embed_dtype
+        self.decoder_dtype = decoder_dtype
+        self.layernorm_dtype = layernorm_dtype
+        self.head_dtype = head_dtype
+        self.bias = bias
+        
         super().__init__()
         self.embed = GPTEmbedding(embedding_dim=hidden_size,
                                   vocab_size=vocab_size,
@@ -94,6 +103,11 @@ class Quant_GPT(nn.Module):
                      checkpoint=checkpoint,
                      activation_offload=activation_offload) for _ in range(depth)
         ])
+        
+        # self.layer_norm = []
+        self.embed_layer_norm = []
+        self.head_layer_norm = []
+        self.decoder_layer_norm = []
 
         self.norm = col_nn.LayerNorm(normalized_shape=hidden_size, eps=layernorm_epsilon, dtype=layernorm_dtype)
 
@@ -110,6 +124,8 @@ class Quant_GPT(nn.Module):
         x = self.embed(input_ids)
         # the size of x after embed layer is (BATCH_SIZE, SEQ_LEN, HIDDEN_SIZE)
 
+        ## NEW CASTING WORK
+        x = x.to(dtype=self.decoder_dtype)
         # We create a 3D attention mask from a 2D tensor mask.
         # Sizes are [batch_size, 1, 1, to_seq_length]
         # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
@@ -126,6 +142,18 @@ class Quant_GPT(nn.Module):
         for block in self.blocks:
             x, attention_mask = block(x, attention_mask)
 
+        # with suppress(Exception): print("X. dtype before attention head step 👇")
+        # with suppress(Exception): print("X/embed: ", x.dtype)
+        # with suppress(Exception): print("Norm in total: ", self.norm)
+        # with suppress(Exception): print("self.norm.weight.dtype: ", self.norm.weight.dtype)
+        # with suppress(Exception): print("self.norm.bias.dtype: ", self.norm.bias.dtype)
+        # with suppress(Exception): print("self.head.dtype: ", self.head.dtype)
+        # with suppress(Exception): print("self.head.dense.dtype: ", self.head.weight.dtype)
+        # with suppress(Exception): print("self.head.dtype: ", self.head.dense)
+        # with suppress(Exception): print("self.head.dtype: ", self.head.dense.dtype)
+        # with suppress(Exception): print("self.head.bias: ", self.head.bias)
+        # with suppress(Exception): print("self.head.word_embedding_weight.dtype: ", self.head.word_embedding_weight.dtype)
+        
         x = self.head(self.norm(x))
         # the size of x is (BATCH_SIZE, SEQ_LEN, VOCAB_SIZE)
 
